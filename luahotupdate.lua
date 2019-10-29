@@ -1,3 +1,9 @@
+--[[
+
+HU.Init
+
+]]
+
 local HU = {}
 
 function HU.FailNotify(...)
@@ -78,6 +84,7 @@ function HU.InitFakeTable()
 		end
 		return HU.RequireMap[LuaPath]
 	end
+
 	function meta.__index(t, k)
 		if k == "setmetatable" then
 			return setmetatable
@@ -93,6 +100,7 @@ function HU.InitFakeTable()
 			return FakeTable 
 		end
 	end
+
 	function meta.__newindex(t, k, v) rawset(t, k, v) end
 	function meta.__call() return FakeT(), FakeT(), FakeT() end
 	function meta.__add() return meta.__call() end
@@ -107,6 +115,7 @@ function HU.InitFakeTable()
 	function meta.__lt() return meta.__call() end
 	function meta.__le() return meta.__call() end
 	function meta.__len() return meta.__call() end
+	
 	return FakeT
 end
 
@@ -165,11 +174,13 @@ function HU.BuildNewCode(SysPath, LuaPath)
 		io.input():close()
 		return false
 	end
+
 	HU.DebugNofity(SysPath)
 	io.input(SysPath)  
 	local chunk = "--[["..LuaPath.."]] "
 	chunk = chunk..NewCode	
 	io.input():close()
+
 	local NewFunction = loadstring(chunk)
 	if not NewFunction then 
   		HU.FailNotify(SysPath.." has syntax error.")  	
@@ -183,6 +194,7 @@ function HU.BuildNewCode(SysPath, LuaPath)
 		local NewObject
 		HU.ErrorHappen = false
 		xpcall(function () NewObject = NewFunction() end, HU.ErrorHandle)
+
 		if not HU.ErrorHappen then 
 			HU.OldCode[SysPath] = NewCode
 			return true, NewObject
@@ -257,16 +269,20 @@ end
 
 function HU.HotUpdateCode(LuaPath, SysPath)
 	local OldObject = package.loaded[LuaPath]
+
 	if OldObject ~= nil then
 		HU.VisitedSig = {}
 		HU.ChangedFuncList = {}
+
 		local Success, NewObject = HU.BuildNewCode(SysPath, LuaPath)
 		if Success then
+
 			HU.ReplaceOld(OldObject, NewObject, LuaPath, "Main", "")
 			for LuaPath, NewObject in pairs(HU.RequireMap) do
 				local OldObject = package.loaded[LuaPath]
 				HU.ReplaceOld(OldObject, NewObject, LuaPath, "Main_require", "")
 			end
+
 			setmetatable(HU.FakeENV, nil)
 			HU.UpdateAllFunction(HU.ENV, HU.FakeENV, " ENV ", "Main", "")
 			if #HU.ChangedFuncList > 0 then
@@ -372,6 +388,12 @@ function HU.UpdateAllFunction(OldTable, NewTable, Name, From, Deepth)
 	end
 end
 
+--[[
+UpdateListFile: hotfix code
+RootPath:       root path of target files
+FailNotify:     error handle function
+ENV:            environment of ...
+]]
 function HU.Init(UpdateListFile, RootPath, FailNotify, ENV)
 	HU.UpdateListFile = UpdateListFile
 	HU.HUMap = {}
@@ -389,6 +411,7 @@ function HU.Init(UpdateListFile, RootPath, FailNotify, ENV)
 	HU.ALL = false
 end
 
+-- 定时调用一下 HU.Update
 function HU.Update()
 	HU.AddFileFromHUList()
 	for LuaPath, SysPath in pairs(HU.HUMap) do
