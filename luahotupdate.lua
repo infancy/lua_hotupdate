@@ -13,6 +13,11 @@ function HU.DebugNofity(...)
 	if HU.DebugNofityFunc then HU.DebugNofityFunc(...) end
 end
 
+
+
+
+
+-- 当前工作的磁盘, 'C:\\', 'D:\\'
 local function GetWorkingDir()
 	if HU.WorkingDir == nil then
 	    local p = io.popen("echo %cd%")
@@ -29,11 +34,14 @@ local function Normalize(path)
 	if path:find(":") == nil then
 		path = GetWorkingDir()..path 
 	end
+	
+	-- 去掉末尾的 '\\'
 	local pathLen = #path 
 	if path:sub(pathLen, pathLen) == "\\" then
 		 path = path:sub(1, pathLen - 1)
 	end
 	 
+	-- 处理 '../xx/../xx' 之类的
     local parts = { }
     for w in path:gmatch("[^\\]+") do
         if     w == ".." and #parts ~=0 then table.remove(parts)
@@ -43,11 +51,15 @@ local function Normalize(path)
     return table.concat(parts, "\\")
 end
 
+-- example: RootPath = { '../Logic/Lua', 'Resource/Lua\\', 'D:\\UI/Lua' }
 function HU.InitFileMap(RootPath)
 	for _, rootpath in pairs(RootPath) do
+		
 		rootpath = Normalize(rootpath)
+		
 		local file = io.popen("dir /S/B /A:A \""..rootpath.."\"")
 		io.input(file)
+		
 		for line in io.lines() do
 	   		local FileName = string.match(line,".*\\(.*)%.lua")
 	  	    if FileName ~= nil then
@@ -60,15 +72,21 @@ function HU.InitFileMap(RootPath)
 	        	table.insert(HU.FileMap[FileName], {SysPath = line, LuaPath = luapath})
 	    	end
 	    end
+		
 	    file:close()
 	end
 end
 
+-- 初始化 hotfix function 运行时的沙箱环境
+-- 在这个沙箱里, 所有全局操作都不会生效
+-- 如 'setmetatable', 'getmetatable', 'require'
 function HU.InitFakeTable()
 	local meta = {}
 	HU.Meta = meta
+	
 	local function FakeT() return setmetatable({}, meta) end
 	local function EmptyFunc() end
+	
 	local function pairs() return EmptyFunc end  
 	local function setmetatable(t, metaT)
 		HU.MetaMap[t] = metaT 
@@ -100,8 +118,8 @@ function HU.InitFakeTable()
 			return FakeTable 
 		end
 	end
-
 	function meta.__newindex(t, k, v) rawset(t, k, v) end
+	-- 忽略所有传入的参数
 	function meta.__call() return FakeT(), FakeT(), FakeT() end
 	function meta.__add() return meta.__call() end
 	function meta.__sub() return meta.__call() end
@@ -119,6 +137,7 @@ function HU.InitFakeTable()
 	return FakeT
 end
 
+-- 给已经做了保护/热更新的地方做个标记
 function HU.InitProtection()
 	HU.Protection = {}
 	HU.Protection[setmetatable] = true
@@ -133,12 +152,26 @@ function HU.InitProtection()
 	HU.Protection[table] = true
 end
 
+
+
+--[[
+UpdateListFile example:
+
+local FileNameList = {
+	-- _ALL_ 对所有 lua 文件进行修复
+	"test",
+}
+return FileNameList
+]]
 function HU.AddFileFromHUList()
 	package.loaded[HU.UpdateListFile] = nil
 	local FileList = require (HU.UpdateListFile)
+	
 	HU.ALL = false
 	HU.HUMap = {}
+	
 	for _, file in pairs(FileList) do
+		
 		if file == "_ALL_" then
 			HU.ALL = true
 			for k, v in pairs(HU.FileMap) do
@@ -148,9 +181,10 @@ function HU.AddFileFromHUList()
 			end
 			return
 		end
+		
 		if HU.FileMap[file] then
 			for _, path in pairs(HU.FileMap[file]) do
-				HU.HUMap[path.LuaPath] = path.SysPath  	
+				HU.HUMap[path.LuaPath] = path.SysPath	-- 要修复的 lua 文件
 			end
 		else
 			HU.FailNotify("HotUpdate can't not find "..file)
@@ -163,6 +197,9 @@ function HU.ErrorHandle(e)
 	HU.ErrorHappen = true
 end
 
+
+
+-- BuildNewCode -> ReplaceOld -> UpdateAllFunction -> Travel_G
 function HU.BuildNewCode(SysPath, LuaPath)
 	io.input(SysPath)
 	local NewCode = io.read("*all")
@@ -187,9 +224,11 @@ function HU.BuildNewCode(SysPath, LuaPath)
   		collectgarbage("collect")
   		return false
 	else
+		-- 先清理一下
 		HU.FakeENV = HU.FakeT()
 		HU.MetaMap = {}
 		HU.RequireMap = {}
+		
 		setfenv(NewFunction, HU.FakeENV)
 		local NewObject
 		HU.ErrorHappen = false
@@ -267,6 +306,9 @@ function HU.ReplaceOld(OldObject, NewObject, LuaPath, From, Deepth)
 	end
 end
 
+
+
+-- 对要修复的每个 lua 文件, 尝试替换函数实现
 function HU.HotUpdateCode(LuaPath, SysPath)
 	local OldObject = package.loaded[LuaPath]
 
@@ -285,12 +327,15 @@ function HU.HotUpdateCode(LuaPath, SysPath)
 
 			setmetatable(HU.FakeENV, nil)
 			HU.UpdateAllFunction(HU.ENV, HU.FakeENV, " ENV ", "Main", "")
+			
 			if #HU.ChangedFuncList > 0 then
 				HU.Travel_G()
 			end
+			
 			collectgarbage("collect")
 		end
 	elseif HU.OldCode[SysPath] == nil then 
+		
 		io.input(SysPath)
 		HU.OldCode[SysPath] = io.read("*all")
 		io.input():close()
@@ -299,9 +344,12 @@ end
 
 function HU.ResetENV(object, name, From, Deepth)
 	local visited = {}
+	
 	local function f(object, name)
+		
 		if not object or visited[object] then return end
 		visited[object] = true
+		
 		if type(object) == "function" then
 			HU.DebugNofity(Deepth.."HU.ResetENV", name, "  from:"..From)
 			xpcall(function () setfenv(object, HU.ENV) end, HU.FailNotify)
@@ -313,9 +361,13 @@ function HU.ResetENV(object, name, From, Deepth)
 			end
 		end
 	end
+	
 	f(object, name)
 end
 
+
+
+-- UpdateAllFunction -> UpdateOneFunction -> UpdateUpvalue
 function HU.UpdateUpvalue(OldFunction, NewFunction, Name, From, Deepth)
 	HU.DebugNofity(Deepth.."HU.UpdateUpvalue", Name, "  from:"..From)
 	local OldUpvalueMap = {}
@@ -388,6 +440,10 @@ function HU.UpdateAllFunction(OldTable, NewTable, Name, From, Deepth)
 	end
 end
 
+
+
+
+
 --[[
 UpdateListFile: hotfix code
 RootPath:       root path of target files
@@ -405,7 +461,9 @@ function HU.Init(UpdateListFile, RootPath, FailNotify, ENV)
 	HU.FakeENV = nil
 	HU.ENV = ENV or _G
 	HU.LuaPathToSysPath = {}
-	HU.InitFileMap(RootPath)
+	
+	HU.InitFileMap(RootPath) -- 预先生成 RootPath 的 map, 后面更新用
+	
 	HU.FakeT = HU.InitFakeTable()
 	HU.InitProtection()
 	HU.ALL = false
