@@ -1,5 +1,5 @@
 local HU = require "luahotupdate"
-HU.Init("hotupdatelist", {"D:\\ldt\\workspace\\hotimplement\\src"}) --please replace the second parameter with you src path
+HU.Init("hotupdatelist", {"D:\\desktop\\opensrc\\lua_hotupdate"}) --please replace the second parameter with you src path
 
 function sleep(t)
   local now_time = os.clock()

@@ -1,3 +1,34 @@
+-- _ENV 只不过是一个 update
+local function setfenv(fn, env)
+    local i = 1
+    while true do
+        local name = debug.getupvalue(fn, i)
+        if name == "_ENV" then
+            debug.upvaluejoin(fn, i, (function() return env end), 1)
+            break
+        elseif not name then
+            break
+        end
+
+        i = i + 1
+    end
+
+    return fn
+end
+
+local function getfenv(fn)
+    local i = 1
+    while true do
+        local name, val = debug.getupvalue(fn, i)
+        if name == "_ENV" then
+            return val
+        elseif not name then
+            break
+        end
+        i = i + 1
+    end
+end
+
 --[[
 
 HU.Init
@@ -52,8 +83,8 @@ local function Normalize(path)
 end
 
 -- example: RootPath = { '../Logic/Lua', 'Resource/Lua\\', 'D:\\UI/Lua' }
-function HU.InitFileMap(RootPath)
-	for _, rootpath in pairs(RootPath) do
+function HU.InitFileMap(RootPaths)
+	for _, rootpath in pairs(RootPaths) do
 		
 		rootpath = Normalize(rootpath)
 		
@@ -200,9 +231,10 @@ end
 
 
 -- BuildNewCode -> ReplaceOld -> UpdateAllFunction -> Travel_G
+-- 'D:\desktop\opensrc\lua_hotupdate\test.lua', 'test'
 function HU.BuildNewCode(SysPath, LuaPath)
 	io.input(SysPath)
-	local NewCode = io.read("*all")
+	local NewCode = io.read("*all") -- 按原路径重新加载
 	if HU.ALL and HU.OldCode[SysPath] == nil then
 		HU.OldCode[SysPath] = NewCode
 		return
@@ -218,9 +250,9 @@ function HU.BuildNewCode(SysPath, LuaPath)
 	chunk = chunk..NewCode	
 	io.input():close()
 
-	local NewFunction = loadstring(chunk)
+	local NewFunction = load(chunk) -- Since Lua 5.2, loadstring has been replaced by load.
 	if not NewFunction then 
-  		HU.FailNotify(SysPath.." has syntax error.")  	
+  		HU.FailNotify(SysPath.." has syntax error.")	
   		collectgarbage("collect")
   		return false
 	else
@@ -320,6 +352,7 @@ function HU.HotUpdateCode(LuaPath, SysPath)
 		if Success then
 
 			HU.ReplaceOld(OldObject, NewObject, LuaPath, "Main", "")
+			-- 这三个变量都和上面的重复了
 			for LuaPath, NewObject in pairs(HU.RequireMap) do
 				local OldObject = package.loaded[LuaPath]
 				HU.ReplaceOld(OldObject, NewObject, LuaPath, "Main_require", "")
@@ -343,6 +376,7 @@ function HU.HotUpdateCode(LuaPath, SysPath)
 end
 
 function HU.ResetENV(object, name, From, Deepth)
+	-- 把 upvalue 当成员变量或者捕获变量看好了
 	local visited = {}
 	
 	local function f(object, name)
@@ -361,7 +395,8 @@ function HU.ResetENV(object, name, From, Deepth)
 			end
 		end
 	end
-	
+	-- auto f = [visited]() { ... };
+	-- f(obj, name);
 	f(object, name)
 end
 
@@ -406,7 +441,7 @@ function HU.UpdateOneFunction(OldObject, NewObject, FuncName, OldTable, From, De
 	if HU.VisitedSig[signature] then return end
 	HU.VisitedSig[signature] = true
 	HU.DebugNofity(Deepth.."HU.UpdateOneFunction "..FuncName.."  from:"..From)
-	if pcall(debug.setfenv, NewObject, getfenv(OldObject)) then
+	if pcall(setfenv, NewObject, getfenv(OldObject)) then
 		HU.UpdateUpvalue(OldObject, NewObject, FuncName, "HU.UpdateOneFunction", Deepth.."    ")
 		HU.ChangedFuncList[#HU.ChangedFuncList + 1] = {OldObject, NewObject, FuncName, OldTable}
 	end
